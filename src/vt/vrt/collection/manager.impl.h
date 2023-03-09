@@ -2197,6 +2197,50 @@ void CollectionManager::checkpointToFile(
   checkpoint::serializeToFile(directory, directory_name);
 }
 
+template <typename ColT, typename IndexT>
+void CollectionManager::checkpointToAggregateFile(
+  CollectionProxyWrapType<ColT> proxy, std::string const& file_name
+) {
+  auto proxy_bits = proxy.getProxy();
+
+  vt_debug_print(
+    normal, vrt_coll,
+    "checkpointToFile: proxy={:x}, file_base={}\n",
+    proxy_bits, file_name
+  );
+
+  // Get the element holder
+  auto holder_ = findElmHolder<IndexT>(proxy_bits);
+  vtAssert(holder_ != nullptr, "Must have valid holder for collection");
+
+  auto range = getRange<ColT>(proxy_bits);
+
+  CollectionDirectory<IndexT> directory;
+
+  size_t total_bytes = 0;
+  holder_->foreach([&](IndexT const& idx, Indexable<IndexT>* elm) {
+    auto const bytes = checkpoint::getSize(*static_cast<ColT*>(elm));
+    total_bytes += bytes;
+    directory.elements_.emplace_back(
+      typename CollectionDirectory<IndexT>::Element{idx, "", bytes}
+    );
+  });
+
+  directory.label_ = getLabel(proxy_bits);
+  total_bytes += checkpoint::getSize(directory);
+
+  std::vector<char> buf(total_bytes);
+  size_t offset = 0;
+
+  checkpoint::serialize(directory, [&](size_t size) -> char* {offset+=size; return &buf[offset-size];});
+  
+  holder_->foreach([&](IndexT const& idx, Indexable<IndexT>* elm) {
+    checkpoint::serialize(*static_cast<ColT*>(elm), [&](size_t size) -> char* {offset+=size; return &buf[offset-size];});
+  });
+
+  checkpoint::serializeToFile(buf, file_name); 
+}
+
 namespace detail {
 template <typename ColT>
 inline void restoreOffHomeElement(
@@ -2287,6 +2331,68 @@ void CollectionManager::restoreFromFileInPlace(
 
     auto ptr = elm_holder->lookup(idx).getRawPtr();
     checkpoint::deserializeInPlaceFromFile<ColT>(file_name, static_cast<ColT*>(ptr));
+    ptr->lb_data_.resetPhase();
+  }
+}
+
+template <typename ColT>
+void CollectionManager::restoreFromAggregateFileInPlace(
+  CollectionProxyWrapType<ColT> proxy, typename ColT::IndexType range,
+  std::string const& file_name
+) {
+  using IndexType = typename ColT::IndexType;
+  using DirectoryType = CollectionDirectory<IndexType>;
+
+  auto proxy_bits = proxy.getProxy();
+
+  if (access(file_name.c_str(), F_OK) == -1) {
+    throw std::runtime_error("Collection file cannot be found");
+  }
+
+  auto buffer = checkpoint::deserializeFromFile<std::vector<char>>(file_name);
+  size_t offset = 0;
+
+  auto directory = checkpoint::deserialize<DirectoryType>(
+    &((*buffer)[offset])
+  );
+  offset += checkpoint::getSize(*directory);
+
+  runInEpochCollective([&]{
+    for (auto&& elm : directory->elements_) {
+      auto idx = elm.idx_;
+
+      if (proxy(idx).tryGetLocalPtr() == nullptr) {
+        auto mapped_node = getMappedNode<ColT>(proxy, idx);
+        vtAssertExpr(mapped_node != uninitialized_destination);
+        auto this_node = theContext()->getNode();
+
+        using MsgType = RestoreMigrateMsg<ColT>;
+        auto msg = makeMessage<MsgType>(this_node, idx, proxy);
+        if (mapped_node != this_node) {
+          theMsg()->sendMsg<MsgType, migrateToRestoreLocation<ColT>>(
+            mapped_node, msg
+          );
+        } else {
+          migrateToRestoreLocation<ColT>(msg.get());
+        }
+      }
+    }
+  });
+
+  for (auto&& elm : directory->elements_) {
+    auto idx = elm.idx_;
+    vtAssertExpr(proxy(idx).tryGetLocalPtr() != nullptr);
+
+    auto holder = findColHolder<IndexType>(proxy_bits);
+    vtAssertExpr(holder != nullptr);
+
+    auto elm_holder = findElmHolder<IndexType>(proxy_bits);
+    auto const elm_exists = elm_holder->exists(idx);
+    vtAssertExpr(elm_exists);
+
+    auto ptr = elm_holder->lookup(idx).getRawPtr();
+    checkpoint::deserializeInPlace<ColT>(&(*buffer)[offset], static_cast<ColT*>(ptr));
+    offset += checkpoint::getSize(*static_cast<ColT*>(ptr));
     ptr->lb_data_.resetPhase();
   }
 }

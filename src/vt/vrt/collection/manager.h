@@ -1645,6 +1645,11 @@ public:
     bool make_sub_dirs = true, int files_per_directory = 4
   );
 
+  template <typename ColT, typename IndexT = typename ColT::IndexType>
+  void checkpointToAggregateFile(
+    CollectionProxyWrapType<ColT> proxy, std::string const& file
+  );
+
   /**
    * \brief Restore the collection (collective) from file.
    *
@@ -1660,6 +1665,12 @@ public:
     typename ColT::IndexType range, std::string const& file_base
   );
 
+  template <typename ColT>
+  void restoreFromAggregateFileInPlace(
+    CollectionProxyWrapType<ColT> proxy, typename ColT::IndexType range,
+    std::string const& file
+  );
+  
   /**
    * \internal \struct RestoreMigrateMsg
    *
