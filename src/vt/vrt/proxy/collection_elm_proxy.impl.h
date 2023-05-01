@@ -2,7 +2,7 @@
 //@HEADER
 // *****************************************************************************
 //
-//                                  manager.cc
+//                           collection_proxy.impl.h
 //                       DARMA/vt => Virtual Transport
 //
 // Copyright 2019-2021 National Technology & Engineering Solutions of Sandia, LLC
@@ -41,62 +41,68 @@
 //@HEADER
 */
 
+#if !defined INCLUDED_VT_VRT_PROXY_COLLECTION_ELM_PROXY_H
+#define INCLUDED_VT_VRT_PROXY_COLLECTION_ELM_PROXY_H
+
 #include "vt/config.h"
-#include "vt/configs/arguments/app_config.h"
-#include "vt/runtime/runtime.h"
-#include "vt/vrt/vrt_common.h"
-#include "vt/vrt/base/base.h"
 #include "vt/vrt/collection/manager.h"
-#include "vt/vrt/collection/balance/lb_invoke/lb_manager.h"
+#include "vt/vrt/proxy/collection_elm_proxy.h"
 
 namespace vt { namespace vrt { namespace collection {
 
-CollectionManager::CollectionManager() { }
-
-void CollectionManager::finalize() {
-  cleanupAll<>();
+//Standard serialize, just pass along to base.
+template <typename ColT, typename IndexT>
+template <typename Ser>
+void VrtElmProxy<ColT, IndexT>::serialize(DefaultSerializer<Ser>& s) {
+  ProxyCollectionElmTraits<ColT, IndexT>::serialize(s);
 }
 
-/*virtual*/ CollectionManager::~CollectionManager() { }
+//Checkpoint serialize, actually serialize the element itself.
+template <typename ColT, typename IndexT>
+template <typename Ser> 
+void VrtElmProxy<ColT, IndexT>::serialize(CheckpointSerializer<Ser>& s) {
+  ProxyCollectionElmTraits<ColT, IndexT>::serialize(s);
+  
+  //Make sure proxies within the element don't also try recovering
+  auto elm_serializer = checkpoint::withoutTrait<vt::vrt::CheckpointTrait>(s);
 
-void CollectionManager::startup() {
-#if vt_check_enabled(lblite)
-  // First hook, do all LB data manipulation
-  thePhase()->registerHookCollective(phase::PhaseHook::End, []{
-    auto const& map = theCollection()->collect_lb_data_for_lb_;
-    for (auto&& elm : map) {
-      // this will trigger all the data collection required for LB
-      elm.second();
-    }
-    auto const cur_phase = thePhase()->getCurrentPhase();
-    theLBManager()->selectStartLB(cur_phase);
-  });
-#endif
-}
+  auto local_elm_ptr = this->tryGetLocalPtr();
+  if(local_elm_ptr != nullptr){
+    local_elm_ptr | elm_serializer;
+  } else {
+    //The element is somewhere else so we'll need to request a migration to here.
+    vtAssert(!s.isUnpacking(), "Must serialize elements from the node they are at");
 
-DispatchBasePtrType
-getDispatcher(auto_registry::AutoHandlerType const han) {
-  return theCollection()->getDispatcher(han);
-}
+    //Avoid delaying the serializer though, we want to enable asynchronous progress.
+    std::unique_ptr<ColT> new_elm_ptr;
+    new_elm_ptr | elm_serializer;
 
-elm::ElementIDStruct CollectionManager::getCurrentContext() const {
-# if vt_check_enabled(lblite)
-  if (theContext()->getTask() != nullptr) {
-    auto lb = theContext()->getTask()->get<ctx::LBData>();
-    if (lb != nullptr) {
-      return lb->getCurrentElementID();
-    }
+    auto ep = theCollection()->requestMigrateDeferred(*this, theContext()->getNode());
+
+    theTerm()->addAction(ep, [*this, new_elm_ptr = std::move(new_elm_ptr)]{
+      auto local_elm_ptr = *this.tryGetLocalPtr();
+      assert(local_elm_ptr != nullptr);
+      local_elm_ptr = std::move(new_elm_ptr);
+    });
   }
-#endif
-  return elm::ElementIDStruct{};
 }
 
-void CollectionManager::schedule(ActionType action) {
-  theSched()->enqueue(action);
-}
-
-/*static*/ void CollectionManager::computeReduceStamp(CollectionStampMsg* msg) {
-  theCollection()->reduce_stamp_[msg->proxy_] = msg->getVal();
+//Deserialize without placing values into the runtime, 
+//just return the element pointer.
+template <typename ColT, typename IndexT>
+template <typename Ser>
+std::unique_ptr<ColT> 
+VrtElmProxy<ColT, IndexT>::deserializeToElm(Ser& s) {
+  //Still have to hit data in order.
+  ProxyCollectionElmTraits<ColT, IndexT>::serialize(s);
+  
+  //Make sure proxies within the element don't also try recovering
+  auto elm_serializer = checkpoint::withoutTrait<vt::vrt::CheckpointTrait>(s);
+  
+  std::unique_ptr<ColT> elm;
+  elm | elm_serializer;
+  return elm;
 }
 
 }}} /* end namespace vt::vrt::collection */
+

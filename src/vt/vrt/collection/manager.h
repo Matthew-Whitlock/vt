@@ -360,10 +360,14 @@ struct CollectionManager
    *
    * \param[in] is_collective whether the collection is collective
    * \param[in] is_migratable whether the collection is migratable
+   * \param[in] request_match an input proxy which we would like to use, if
+   *            there are no existing conflicts. no_vrt_proxy indicates no 
+   *            request.
    *
    * \return the collection proxy bits
    */
-  VirtualProxyType makeCollectionProxy(bool is_collective, bool is_migratable);
+  template<typename IndexT>
+  VirtualProxyType makeCollectionProxy(bool is_collective, bool is_migratable, VirtualProxyType request_match);
 
   /**
    * \brief Query the current index context of the running handler
@@ -1614,6 +1618,16 @@ public:
   IndexT getRange(VirtualProxyType proxy);
 
   /**
+   * \brief Get the whether the collection has dynamic membership
+   *
+   * \param[in] proxy the proxy of the collection
+   *
+   * \return the dynamic membership state
+   */
+  template <typename ColT, typename IndexT = typename ColT::IndexType>
+  bool getDynamicMembership(VirtualProxyType proxy);
+  
+  /**
    * \brief Get the local indices that are currently on this node
    *
    * \param[in] proxy the proxy of the collection
@@ -1685,54 +1699,47 @@ public:
   );
 
   /**
-   * \internal \struct RestoreMigrateMsg
+   * \internal \struct MigrateRequestMsg
    *
-   * \brief Migrate elements to restore where it belongs based on the checkpoint
+   * \brief Migrate local element, potentially requested by remote location
    */
   template <
     typename ColT,
-    typename MsgT = vt::Message,
-    typename IdxT = typename ColT::IndexType
+    typename MsgT = vt::Message
   >
-  struct RestoreMigrateMsg : MsgT {
-    RestoreMigrateMsg() = default;
-    RestoreMigrateMsg(
-      NodeType in_to_node, IdxT in_idx, CollectionProxyWrapType<ColT> in_proxy
-    ) : to_node_(in_to_node),
-        idx_(in_idx),
-        proxy_(in_proxy)
+  struct MigrateRequestMsg : MsgT {
+    using ElmT = VrtElmProxy<ColT, typename ColT::IndexType>;
+
+    MigrateRequestMsg() = default;
+    MigrateRequestMsg(
+      ElmT proxy_elm, NodeType to_node
+    ) : to_node_(to_node),
+        proxy_elm_(proxy_elm)
     { }
 
     NodeType to_node_ = uninitialized_destination;
-    IdxT idx_;
-    CollectionProxyWrapType<ColT> proxy_;
+    ElmT proxy_elm_;
   };
 
   /**
-   * \internal \struct RestoreMigrateColMsg
-   *
-   * \brief Migrate collection element to restore where it belongs
-   */
-  template <typename ColT, typename IdxT = typename ColT::IndexType>
-  struct RestoreMigrateColMsg
-    : RestoreMigrateMsg<ColT, CollectionMessage<ColT>, IdxT>
-  {
-    RestoreMigrateColMsg() = default;
-    RestoreMigrateColMsg(
-      NodeType in_to_node, IdxT in_idx, CollectionProxyWrapType<ColT> in_proxy
-    ) : RestoreMigrateMsg<ColT, CollectionMessage<ColT>, IdxT>(
-          in_to_node, in_idx, in_proxy
-        )
-    { }
-  };
-
-  /**
-   * \internal \brief Migrate element to restore location from checkpoint
-   *
-   * \param[in] msg the migrate message
+   * \brief Migrate a remote proxy element to a node, by messaging that
+   *        node to initiate a migration. Immediately returns a rooted epoch
+   *        containing the request message.
    */
   template <typename ColT>
-  static void migrateToRestoreLocation(RestoreMigrateMsg<ColT>* msg);
+  EpochType requestMigrateDeferred(
+    VrtElmProxy<ColT, typename ColT::IndexType> proxy_elem, NodeType destination
+  );
+
+  /**
+   * \brief Migrate a remote proxy element to a node, by messaging that
+   *        node to initiate a migration. Returns after migration is complete.
+   */
+  template <typename ColT>
+  void requestMigrate(
+    VrtElmProxy<ColT, typename ColT::IndexType> proxy_elem, NodeType destination
+  );
+
 
   /**
    * \brief Restore the collection (collective) from file on top of an existing
