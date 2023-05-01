@@ -330,6 +330,7 @@ public:
    */
   template <typename Iter>
   ThisType&& listInsertHere(Iter begin, Iter end) {
+    did_list_insert_here_ = true;
     for (auto&& iter = begin; iter != end; ++iter) {
       list_insert_here_.emplace_back(std::move(*iter));
     }
@@ -404,7 +405,7 @@ private:
         has_bounds_ or
         (not has_bounds_ and bulk_inserts_.size() == 1) or
         (not has_bounds_ and
-         (list_inserts_.size() > 0 or list_insert_here_.size() > 0)),
+         (list_inserts_.size() > 0 or did_list_insert_here_)),
         "Must have valid bounds or exactly one bulk insert or use list insertion"
       );
     }
@@ -438,6 +439,7 @@ public:
       | label_;
     s.skip(list_inserts_);
     s.skip(list_insert_here_);
+    s.skip(did_list_insert_here_);
     s.skip(cons_fn_);
   }
 
@@ -447,6 +449,7 @@ private:
   std::vector<IndexType> bulk_inserts_             = {};
   std::vector<ListInsertType> list_inserts_        = {};
   std::vector<ListInsertElmType> list_insert_here_ = {};
+  bool did_list_insert_here_                       = false;
   bool bulk_insert_bounds_                         = false;
   ConstructFnType cons_fn_                         = nullptr;
   bool dynamic_membership_                         = false;
