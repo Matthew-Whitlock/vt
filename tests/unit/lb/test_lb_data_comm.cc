@@ -759,7 +759,7 @@ TEST_F(TestLBDataComm, test_lb_data_comm_handler_to_handler_send) {
   EXPECT_TRUE(found);
 
   // Suppress warnings about that method being "declared but never referenced" from Intel icpc and Nvidia nvcc
-  (void)&ReduceMsg::serialize<checkpoint::Serializer<>>;
+  (void)&ReduceMsg::serialize<checkpoint::Serializer>;
 }
 
 } /* end anon namespace */

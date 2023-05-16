@@ -193,10 +193,10 @@ void CollectionManager::makeCollectionImpl(param::ConstructParams<ColT>& po) {
     makeCollectionElement<ColT>(proxy, idx, this_node, std::move(c));
   }
 
-  if (global_constructed_elms != 0) {
+  //if (global_constructed_elms != 0) {
     // Construct a underlying group for the collection
     constructGroup<ColT>(proxy);
-  }
+  //}
 }
 
 template <typename ColT, typename Callable>
