@@ -90,7 +90,7 @@ private:
 
   void downTreeHandler(LBTreeDownMsg* msg);
   void lbTreeUpHandler(LBTreeUpMsg* msg);
-  void setupDone(SetupDoneMsg* msg);
+  void setupDone();
 
   void downTreeSend(
     NodeType const node, NodeType const from, ObjSampleType const& excess,
@@ -109,7 +109,7 @@ private:
   );
 
   void sendDownTree();
-  void distributeAmoungChildren();
+  void distributeAmongChildren();
   void clearObj(ObjSampleType& objs);
   HierLBChild* findMinChild();
   void startMigrations();

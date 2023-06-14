@@ -2,7 +2,7 @@
 //@HEADER
 // *****************************************************************************
 //
-//                                  reduce.cc
+//                              modifiable.impl.h
 //                       DARMA/vt => Virtual Transport
 //
 // Copyright 2019-2021 National Technology & Engineering Solutions of Sandia, LLC
@@ -40,65 +40,39 @@
 // *****************************************************************************
 //@HEADER
 */
-#include "common/test_harness.h"
-#include <vt/collective/collective_ops.h>
-#include <vt/objgroup/manager.h>
-#include <vt/messaging/active.h>
 
-#include <fmt-vt/core.h>
+#if !defined INCLUDED_VT_VRT_COLLECTION_INSERT_MODIFIABLE_IMPL_H
+#define INCLUDED_VT_VRT_COLLECTION_INSERT_MODIFIABLE_IMPL_H
 
-using namespace vt;
-using namespace vt::tests::perf::common;
+#include "vt/config.h"
+#include "vt/vrt/collection/insert/modifiable.h"
+#include "vt/vrt/collection/manager.h"
+#include "vt/vrt/proxy/base_collection_proxy.h"
 
-static constexpr int num_iters = 100;
+namespace vt { namespace vrt { namespace collection {
 
-struct MyTest : PerfTestHarness { };
+template <typename ColT, typename IndexT, typename BaseProxyT>
+Modifiable<ColT,IndexT,BaseProxyT>::Modifiable(
+  VirtualProxyType const in_proxy
+) : BaseProxyT(in_proxy)
+{ }
 
-struct NodeObj {
-  explicit NodeObj(MyTest* test_obj) : test_obj_(test_obj) { }
-
-  void initialize() { proxy_ = vt::theObjGroup()->getProxy<NodeObj>(this); }
-
-  struct MyMsg : vt::Message {};
-
-  void reduceComplete() {
-    reduce_counter_++;
-    test_obj_->StopTimer(fmt::format("{} reduce", i));
-    test_obj_->GetMemoryUsage();
-    if (i < num_iters) {
-      i++;
-      auto this_node = theContext()->getNode();
-      proxy_[this_node].send<MyMsg, &NodeObj::perfReduce>();
-    } else if (theContext()->getNode() == 0) {
-      theTerm()->enableTD();
-    }
-  }
-
-  void perfReduce(MyMsg* in_msg) {
-    test_obj_->StartTimer(fmt::format("{} reduce", i));
-    proxy_.allreduce<&NodeObj::reduceComplete>();
-  }
-
-private:
-  MyTest* test_obj_ = nullptr;
-  vt::objgroup::proxy::Proxy<NodeObj> proxy_ = {};
-  int reduce_counter_ = -1;
-  int i = 0;
-};
-
-VT_PERF_TEST(MyTest, test_reduce) {
-  auto grp_proxy = vt::theObjGroup()->makeCollective<NodeObj>(
-    "test_reduce", this
-  );
-
-  if (theContext()->getNode() == 0) {
-    theTerm()->disableTD();
-  }
-
-  grp_proxy[my_node_].invoke<&NodeObj::initialize>();
-
-  using MsgType = typename NodeObj::MyMsg;
-  grp_proxy[my_node_].send<MsgType, &NodeObj::perfReduce>();
+template <typename ColT, typename IndexT, typename BaseProxyT>
+ModifierToken Modifiable<ColT,IndexT,BaseProxyT>::beginModification(
+  std::string const& label
+) const {
+  auto const col_proxy = this->getProxy();
+  return theCollection()->beginModification<ColT>(col_proxy, label);
 }
 
-VT_PERF_TEST_MAIN()
+template <typename ColT, typename IndexT, typename BaseProxyT>
+void Modifiable<ColT,IndexT,BaseProxyT>::finishModification(
+  ModifierToken&& token
+) const {
+  auto const col_proxy = this->getProxy();
+  theCollection()->finishModification<ColT>(col_proxy, std::move(token));
+}
+
+}}} /* end namespace vt::vrt::collection */
+
+#endif /*INCLUDED_VT_VRT_COLLECTION_INSERT_MODIFIABLE_IMPL_H*/

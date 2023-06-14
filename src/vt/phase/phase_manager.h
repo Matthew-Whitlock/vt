@@ -57,9 +57,6 @@
 
 namespace vt { namespace phase {
 
-// fwd-decl for reduce messasge
-struct NextMsg;
-
 /**
  * \struct PhaseManager
  *
@@ -186,7 +183,7 @@ private:
    *
    * \param[in] msg the (empty) next phase message
    */
-  void nextPhaseReduce(NextMsg* msg);
+  void nextPhaseReduce();
 
   /**
    * \internal
@@ -194,7 +191,7 @@ private:
    *
    * \param[in] msg the (empty) next phase message
    */
-  void nextPhaseDone(NextMsg* msg);
+  void nextPhaseDone();
 
   /**
    * \internal
@@ -240,9 +237,9 @@ public:
 private:
   PhaseType cur_phase_ = 0;                 /**< Current phase */
   ObjGroupProxyType proxy_ = no_obj_group;  /**< Objgroup proxy  */
-  HookIDMapType collective_hooks_;          /**< Collective regisstered hooks */
-  HookIDMapType rooted_hooks_;              /**< Rooted regisstered hooks  */
-  HookIDMapType unsync_hooks_;              /**< Unsync'ed regisstered hooks  */
+  HookIDMapType collective_hooks_;          /**< Collective registered hooks */
+  HookIDMapType rooted_hooks_;              /**< Rooted registered hooks  */
+  HookIDMapType unsync_hooks_;              /**< Unsync'ed registered hooks  */
   std::size_t next_collective_hook_id_ = 1; /**< Next ID for collective hooks */
   std::size_t next_rooted_hook_id_ = 1;     /**< Next ID for rooted hooks */
   std::size_t next_unsync_hook_id_ = 1;     /**< Next ID for unsync'ed hooks */

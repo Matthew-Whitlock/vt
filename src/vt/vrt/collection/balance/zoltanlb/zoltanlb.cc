@@ -336,13 +336,11 @@ void ZoltanLB::countEdges() {
     total_ids
   );
 
-  auto cb = theCB()->makeBcast<ZoltanLB,ReduceMsg,&ZoltanLB::reduceCount>(proxy);
-  auto msg = makeMessage<ReduceMsg>(total_ids);
-  proxy.reduce<collective::MaxOp<int>>(msg.get(),cb);
+  proxy.allreduce<&ZoltanLB::reduceCount, collective::MaxOp>(total_ids);
 }
 
-void ZoltanLB::reduceCount(ReduceMsg* msg) {
-  max_edges_per_node_ = msg->getVal();
+void ZoltanLB::reduceCount(int max_edges_per_node) {
+  max_edges_per_node_ = max_edges_per_node;
 
   vt_debug_print(
     normal, lb,
@@ -438,7 +436,7 @@ void ZoltanLB::setParams() {
 
 std::unique_ptr<ZoltanLB::Graph> ZoltanLB::makeGraph() {
   // Insert local load objs into a std::set to get a deterministic order to
-  // traverse them for building the graph consistenly
+  // traverse them for building the graph consistently
   std::set<ObjIDType> load_objs;
   for (auto obj : *load_model_) {
     if (obj.isMigratable()) {

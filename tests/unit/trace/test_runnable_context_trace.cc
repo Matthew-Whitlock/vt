@@ -2,7 +2,7 @@
 //@HEADER
 // *****************************************************************************
 //
-//                       test_reduce_collection_common.h
+//                        test_runnable_context_trace.cc
 //                       DARMA/vt => Virtual Transport
 //
 // Copyright 2019-2021 National Technology & Engineering Solutions of Sandia, LLC
@@ -41,76 +41,59 @@
 //@HEADER
 */
 
-#if !defined INCLUDED_UNIT_COLLECTION_TEST_REDUCE_COLLECTION_COMMON_H
-#define INCLUDED_UNIT_COLLECTION_TEST_REDUCE_COLLECTION_COMMON_H
-
-#include <gtest/gtest.h>
+#include <vt/context/runnable_context/trace.h>
 
 #include "test_parallel_harness.h"
-#include "data_message.h"
-#include "vt/vrt/collection/manager.h"
+#include "test_helpers.h"
 
-namespace vt { namespace tests { namespace unit { namespace reduce {
+#if vt_check_enabled(trace_enabled)
 
-int const collect_size = 32;
-int const index_tresh  = 8;
+namespace vt { namespace tests { namespace unit {
 
-struct VectorPayload {
-  VectorPayload() = default;
-  VectorPayload(double num) {
-    vec.push_back(num);
-    vec.push_back(num + 1);
-  }
+using TestRunnableContextTrace = TestParallelHarness;
 
-  friend VectorPayload operator+(VectorPayload v1, VectorPayload const& v2) {
-    for (auto&& elm : v2.vec) {
-      v1.vec.push_back(elm);
-    }
-    return v1;
-  }
-
-  template <typename SerializerT>
-  void serialize(SerializerT& s) {
-    s | vec;
-  }
-
-  std::vector<double> vec;
+struct TraceMsg : ::vt::Message {
 };
 
-struct MyCol : Collection<MyCol, Index1D> {
-  MyCol() {
-    vt_debug_print(
-      normal, reduce,
-      "constructing MyCol on node={}: idx.x()={}, ptr={}\n",
-      theContext()->getNode(), getIndex().x(), print_ptr(this)
-    );
-  }
+void handler_func( TraceMsg * )
+{}
 
-  void noneReduce() { }
+TEST_F(TestRunnableContextTrace, runnable_context_trace_test_1) {
+  if (!theTrace()->checkDynamicRuntimeEnabled())
+    GTEST_SKIP() << "trace tests require --vt_trace to be set";
 
-  void checkVec(VectorPayload v) {
-    auto const size = v.vec.size();
-    vt_debug_print(normal, reduce, "final vec.size={}\n", size);
-    EXPECT_EQ(size, reduce::collect_size * 2U);
-  }
+  auto msg = makeMessage< TraceMsg >();
 
-  void checkNum(int val) {
-    EXPECT_EQ(val, collect_size * (collect_size - 1) / 2);
-  }
+  auto handler = auto_registry::makeAutoHandler< TraceMsg, handler_func >();
 
-  virtual ~MyCol() = default;
-};
+  HandlerManager::setHandlerTrace(handler, true);
 
-struct ColMsg : CollectionMessage<MyCol> {
-  NodeType from_node;
+  // Give some nonsense parameters but Trace shouldn't touch them
+  auto t = ctx::Trace( msg, /* in_trace_event */ 7,
+                  handler, /* in_from_node */ 3,
+                  5, 9, 3, 2 );
 
-  ColMsg() = default;
+  // One event for the trace, one for the top open event, third if mem usage tracing is enabled
+  const int add_num_events = theConfig()->vt_trace_memory_usage ? 3 : 2;
 
-  explicit ColMsg(NodeType const& in_from_node)
-    : from_node(in_from_node)
-  {}
-};
+  auto num_events = theTrace()->getNumTraceEvents();
+  t.start(TimeType{3});
+  EXPECT_EQ(num_events + add_num_events, theTrace()->getNumTraceEvents());
+  auto *last_trace = theTrace()->getLastTraceEvent();
+  EXPECT_NE(last_trace, nullptr);
+  EXPECT_EQ(last_trace->type, theConfig()->vt_trace_memory_usage ? trace::eTraceConstants::MemoryUsageCurrent : trace::eTraceConstants::BeginProcessing);
+  EXPECT_EQ(last_trace->time, TimeType{3});
 
-}}}} // end namespace vt::tests::unit::reduce
+  num_events = theTrace()->getNumTraceEvents();
+  t.finish(TimeType{7});
+  EXPECT_EQ(num_events + add_num_events, theTrace()->getNumTraceEvents());
+  last_trace = theTrace()->getLastTraceEvent();
+  EXPECT_NE(last_trace, nullptr);
+  // Counterintuitive, but we restart the open event as the last action
+  EXPECT_EQ(last_trace->type, trace::eTraceConstants::BeginProcessing);
+  EXPECT_EQ(last_trace->time, TimeType{7}); // Time should still match though
+}
 
-#endif /*INCLUDED_UNIT_COLLECTION_TEST_REDUCE_COLLECTION_COMMON_H*/
+}}} // end namespace vt::tests::unit
+
+#endif // vt_check_enabled(trace_enabled)
