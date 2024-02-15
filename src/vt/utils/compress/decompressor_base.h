@@ -46,6 +46,7 @@
 
 #include <string>
 #include <cstdlib>
+#include <cstdint>
 
 namespace vt { namespace util { namespace compress {
 
